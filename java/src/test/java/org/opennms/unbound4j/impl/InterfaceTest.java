@@ -33,6 +33,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -52,7 +53,7 @@ import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-import org.opennms.unbound4j.api.UnboundConfig;
+import org.opennms.unbound4j.api.Unbound4jConfig;
 
 import com.google.common.base.Stopwatch;
 import com.google.common.net.InetAddresses;
@@ -80,7 +81,7 @@ public class InterfaceTest {
     
     @Before
     public void setUp() {
-        ctx = Interface.create_context(UnboundConfig.newBuilder().build());
+        ctx = Interface.create_context(Unbound4jConfig.newBuilder().build());
     }
 
     @After
@@ -91,12 +92,21 @@ public class InterfaceTest {
 
     @Test
     public void canReverseLoookup() throws UnknownHostException, ExecutionException, InterruptedException {
+        // IPv4
         byte[] addr = InetAddress.getByName("1.1.1.1").getAddress();
         assertThat(Interface.reverse_lookup(ctx, addr).get(), equalTo("one.one.one.one."));
+
+        // IPv6
+        addr = InetAddress.getByName("2606:4700:4700::1111").getAddress();
+        assertThat(Interface.reverse_lookup(ctx, addr).get(), equalTo("one.one.one.one."));
+
+        // No result
+        addr = InetAddress.getByName("198.51.100.1").getAddress();
+        assertThat(Interface.reverse_lookup(ctx, addr).get(), nullValue());
     }
 
-    @Ignore
     @Test
+    @Ignore
     public void canDoItQuick() throws UnknownHostException, InterruptedException {
         final List<CompletableFuture<String>> futures = new ArrayList<>();
         final Set<String> results = new LinkedHashSet<>();
@@ -109,7 +119,7 @@ public class InterfaceTest {
             future.whenComplete((hostname,ex) -> results.add(hostname));
             futures.add(future);
         }
-        System.out.printf("Issued %d asynchronous reverse lookups.\n", futures.size());
+        System.out.printf("Issued %d asynchronous reverse lookups in %dms.\n", futures.size(), stopwatch.elapsed(MILLISECONDS));
 
         // Wait
         try {

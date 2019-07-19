@@ -34,7 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
-import org.opennms.unbound4j.api.UnboundConfig;
+import org.opennms.unbound4j.api.Unbound4jConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +57,7 @@ public class Interface {
 
     private static boolean m_loaded = false;
 
-    protected static native long create_context(UnboundConfig config);
+    protected static native long create_context(Unbound4jConfig config);
 
     protected static native void delete_context(long ctx_id);
 

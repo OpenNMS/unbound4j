@@ -26,21 +26,24 @@
  *     http://www.opennms.com/
  *******************************************************************************/
 
-package org.opennms.unbound4j.api;
+package org.opennms.unbound4j.impl;
 
-public class UnboundConfig {
+import org.opennms.unbound4j.api.Unbound4jContext;
 
-    private UnboundConfig(Builder builder) {
+public class Unbound4jContextImpl implements Unbound4jContext {
+    private final long id;
 
+    public Unbound4jContextImpl(long id) {
+        this.id = id;
     }
 
-    public static Builder newBuilder() {
-        return new Builder();
+    @Override
+    public long getId() {
+        return id;
     }
 
-    public static final class Builder {
-        public UnboundConfig build() {
-            return new UnboundConfig(this);
-        }
+    @Override
+    public void close() {
+        Interface.delete_context(id);
     }
 }

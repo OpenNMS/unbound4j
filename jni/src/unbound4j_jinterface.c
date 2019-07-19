@@ -90,14 +90,57 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
 }
 
 JNIEXPORT jlong JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1context(JNIEnv *env, jclass clazz, jobject config) {
-    char error_str[256];
-    size_t error_str_len = sizeof(error_str);
-    struct ub4j_context *ctx = ub4j_create_context(error_str, error_str_len);
-    if (ctx == NULL) {
-        throwRuntimeException(env, error_str);
+    // Map the configuration from the POJO to the C struct
+    struct ub4j_config ub4jconf;
+
+    char *unbound4jConfigClassName = "org/opennms/unbound4j/api/Unbound4jConfig";
+    jclass unbound4jConfigClazz = (*env)->FindClass(env, unbound4jConfigClassName);
+    if (unbound4jConfigClazz == NULL) {
+        throwNoClassDefError( env, unbound4jConfigClassName);
         return -1;
     }
-    return ctx->id;
+
+    // javap -cp unbound4j-1.0.0-SNAPSHOT.jar -s org.opennms.unbound4j.api.Unbound4jConfig
+    // public boolean isUseSystemResolver();
+    //     descriptor: ()Z
+    jmethodID isUseSystemResolverMethod = (*env)->GetMethodID(env, unbound4jConfigClazz, "isUseSystemResolver", "()Z");
+    if (isUseSystemResolverMethod == NULL) {
+        throwRuntimeException(env, "isUseSystemResolver method not found.");
+        return -1;
+    }
+
+    // public java.lang.String getUnboundConfig();
+    //    descriptor: ()Ljava/lang/String;
+    jmethodID getUnboundConfigMethod = (*env)->GetMethodID(env, unbound4jConfigClazz, "getUnboundConfig", "()Ljava/lang/String;");
+    if (getUnboundConfigMethod == NULL) {
+        throwRuntimeException(env, "getUnboundConfigMethod method not found.");
+        return -1;
+    }
+
+    ub4jconf.use_system_resolver = (*env)->CallBooleanMethod(env, config, isUseSystemResolverMethod);
+    jobject unboundConfig = (*env)->CallObjectMethod(env, config, getUnboundConfigMethod);
+    const char *unboundConfigStr = NULL;
+    if (unboundConfig != NULL) {
+        unboundConfigStr = (*env)->GetStringUTFChars(env, unboundConfig, NULL);
+    }
+    ub4jconf.unbound_config = unboundConfigStr;
+
+    char error_str[256];
+    size_t error_str_len = sizeof(error_str);
+    struct ub4j_context *ctx = ub4j_create_context(&ub4jconf, error_str, error_str_len);
+    long nret;
+    if (ctx == NULL) {
+        throwRuntimeException(env, error_str);
+        nret = -1;
+    } else {
+        nret = ctx->id;
+    }
+
+    if (unboundConfigStr != NULL) {
+        (*env)->ReleaseStringUTFChars(env, unboundConfig, unboundConfigStr);
+    }
+
+    return nret;
 }
 
 JNIEXPORT void JNICALL Java_org_opennms_unbound4j_impl_Interface_delete_1context(JNIEnv *env, jclass clazz, jlong ctx_id) {
@@ -120,7 +163,7 @@ typedef struct {
 
 int findClasses(JNIEnv *env, Classes* classes);
 
-void callback(void* mydata, char* result) {
+void callback(void* mydata, const char* err_str, char* result) {
     CallbackContext* ctx = (CallbackContext*)mydata;
 
     // We can't share the JNIEnv reference between threads, so we need to grab a new one here
@@ -140,15 +183,14 @@ void callback(void* mydata, char* result) {
 
     jclass completableFuture = (*env)->FindClass(env, "java/util/concurrent/CompletableFuture");
     jmethodID complete = (*env)->GetMethodID(env, completableFuture, "complete", "(Ljava/lang/Object;)Z");
-    if (result != NULL) {
+    if (err_str != NULL) {
+        completeCompletableFutureExceptionally(env, ctx->future, err_str);
+    } else if (result != NULL) {
         jstring hostname = (*env)->NewStringUTF(env, result);
         (*env)->CallVoidMethod(env, ctx->future, complete, hostname);
+    } else {
+        (*env)->CallVoidMethod(env, ctx->future, complete, NULL);
     }
-
-    /** TODO: Error handling
-     *  jmethodID complete = (*env)->GetMethodID(env, completableFuture, "completeExceptionally", "(Ljava/lang/Throwable;)Z");
-        (*env)->CallBooleanMethod(env, ctx->future, complete, NULL);
-     */
 
     (*g_vm)->DetachCurrentThread(g_vm);
     cleanup:
@@ -173,17 +215,18 @@ JNIEXPORT jobject JNICALL Java_org_opennms_unbound4j_impl_Interface_reverse_1loo
     CallbackContext* callback_context = malloc(sizeof(CallbackContext));
     callback_context->future = future;
 
-    unsigned char* ipaddrbytes = as_unsigned_char_array(env, addr_bytes);
+    uint8_t* addr;
+    size_t addr_len = as_uint8_array(env, addr_bytes, &addr);
 
     char error_str[256];
     size_t error_str_len = sizeof(error_str);
-    if (ub4j_reverse_lookup(ctx_id, ipaddrbytes, sizeof(ipaddrbytes),
+    if (ub4j_reverse_lookup(ctx_id, addr, addr_len,
             callback_context, callback,
             error_str, error_str_len)) {
         throwRuntimeException(env, error_str);
     }
 
-    free(ipaddrbytes);
+    free(addr);
     return future;
 }
 

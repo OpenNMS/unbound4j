@@ -33,8 +33,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.opennms.unbound4j.api.Unbound4j;
-import org.opennms.unbound4j.api.UnboundConfig;
-import org.opennms.unbound4j.api.UnboundContext;
+import org.opennms.unbound4j.api.Unbound4jConfig;
+import org.opennms.unbound4j.api.Unbound4jContext;
 
 public class Unbound4jImpl implements Unbound4j {
 
@@ -43,12 +43,12 @@ public class Unbound4jImpl implements Unbound4j {
     }
 
     @Override
-    public UnboundContext newContext(UnboundConfig config) {
-        return new UnboundContextImpl(Interface.create_context(config));
+    public Unbound4jContext newContext(Unbound4jConfig config) {
+        return new Unbound4jContextImpl(Interface.create_context(config));
     }
 
     @Override
-    public CompletableFuture<Optional<String>> reverseLookup(UnboundContext ctx, InetAddress addr) {
+    public CompletableFuture<Optional<String>> reverseLookup(Unbound4jContext ctx, InetAddress addr) {
         return Interface.reverse_lookup(ctx.getId(), addr.getAddress()).thenApply(Optional::ofNullable);
     }
 }

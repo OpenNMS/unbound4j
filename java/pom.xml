@@ -61,8 +61,7 @@
             <extensions>true</extensions>
             <configuration>
                 <instructions>
-                    <Export-Package>org.org.opennms.unbound4j.api</Export-Package>
-                    <Private-Package>org.org.opennms.unbound4j.impl</Private-Package>
+                    <Export-Package>org.opennms.unbound4j.api,org.opennms.unbound4j.impl</Export-Package>
                 </instructions>
             </configuration>
         </plugin>

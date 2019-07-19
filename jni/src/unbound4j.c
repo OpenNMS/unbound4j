@@ -5,17 +5,24 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <unbound.h>
+#include <sys/shm.h>
 
 #include "uthash.h"
 #include "unbound4j.h"
 #include "sldns.h"
+#include "dnsutils.h"
 
 struct ub4j_context *contexts = NULL;
-pthread_rwlock_t g_lock;
+pthread_rwlock_t g_ctx_lock;
+pthread_mutex_t g_cfg_lock;
 
 void ub4j_init() {
-    if (pthread_rwlock_init(&g_lock, NULL) != 0) {
+    if (pthread_rwlock_init(&g_ctx_lock, NULL) != 0) {
         printf("unbound4j: Error while initializing read-write lock.\n");
+    }
+
+    if (pthread_mutex_init(&g_cfg_lock, NULL) != 0) {
+        printf("unbound4j: Error while initializing configuration lock.\n");
     }
 }
 
@@ -34,7 +41,39 @@ void ub4j_destroy() {
 
 void* context_processing_thread(void *arg);
 
-struct ub4j_context* ub4j_create_context(char* error, size_t error_len) {
+void ub4j_print_stats(long ctx_id) {
+    struct ub_stats_info* stats;
+    struct ub_shm_stat_info* shm_stat;
+    int id_ctl, id_arr;
+
+    // get shm segments
+    id_ctl = shmget(11777, sizeof(int), SHM_R|SHM_W);
+    if(id_ctl == -1) {
+        printf("shmget failed!");
+        return;
+    }
+    id_arr = shmget(11777+1, sizeof(int), SHM_R|SHM_W);
+    if(id_arr == -1) {
+        printf("shmget failed!!");
+        return;
+    }
+    shm_stat = (struct ub_shm_stat_info*)shmat(id_ctl, NULL, 0);
+    if(shm_stat == (void*)-1) {
+        printf("shmat failed!");
+        return;
+    }
+    stats = (struct ub_stats_info*)shmat(id_arr, NULL, 0);
+    if(stats == (void*)-1) {
+        printf("shmat failed!!");
+        return;
+    }
+
+    shmdt(shm_stat);
+    shmdt(stats);
+}
+
+struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error, size_t error_len) {
+    int retval;
     struct ub4j_context *ctx = malloc(sizeof(struct ub4j_context));
     if (ctx == NULL) {
         snprintf(error, error_len, "Failed to allocate memory for context.");
@@ -49,8 +88,36 @@ struct ub4j_context* ub4j_create_context(char* error, size_t error_len) {
         return NULL;
     }
 
-    // TODO: Read configuration from config object
-    ub_ctx_set_fwd(ctx->ub_ctx, "127.0.0.1");
+    if (config->use_system_resolver) {
+        // Read /etc/resolv.conf for DNS proxy settings
+        if( (retval=ub_ctx_resolvconf(ctx->ub_ctx, "/etc/resolv.conf")) != 0) {
+            snprintf(error, error_len, "Error reading resolv.conf: %s", ub_strerror(retval));
+            ub_ctx_delete(ctx->ub_ctx);
+            return NULL;
+        }
+
+        // Read /etc/hosts for locally supplied host addresses
+        if( (retval=ub_ctx_hosts(ctx->ub_ctx, "/etc/hosts")) != 0) {
+            snprintf(error, error_len, "Error reading hosts: %s", ub_strerror(retval));
+            return NULL;
+        }
+    } else if (config->unbound_config != NULL) {
+        // Loading the configuration this way is not thread safe, so let's make sure we're only loading one at a time
+        pthread_mutex_lock(&g_cfg_lock);
+        if( (retval=ub_ctx_config(ctx->ub_ctx, config->unbound_config)) != 0) {
+            pthread_mutex_unlock(&g_cfg_lock);
+            snprintf(error, error_len, "Error reading Unbound configuration from '%s': %s", config->unbound_config, ub_strerror(retval));
+            ub_ctx_delete(ctx->ub_ctx);
+            return NULL;
+        }
+        pthread_mutex_unlock(&g_cfg_lock);
+    }
+
+    /* Enable statistics?
+    ub_ctx_set_option(ctx->ub_ctx, "statistics-interval:", "1");
+    ub_ctx_set_option(ctx->ub_ctx, "shm-enable:", "yes");
+    ub_ctx_set_option(ctx->ub_ctx, "shm-key:", "11777");
+    */
 
     ctx->ub_fd = ub_fd(ctx->ub_ctx);
     if (ctx->ub_fd < 0) {
@@ -70,20 +137,20 @@ struct ub4j_context* ub4j_create_context(char* error, size_t error_len) {
     ctx->id = ctx->thread_id;
 
     // Store the context
-    if (pthread_rwlock_wrlock(&g_lock) != 0) {
+    if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
         snprintf(error, error_len, "Failed to acquire write lock.");
         ctx->stopping = 1; // Stop the thread
         ub_ctx_delete(ctx->ub_ctx);
         return NULL;
     }
     HASH_ADD_INT(contexts, id, ctx);
-    pthread_rwlock_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_ctx_lock);
     return ctx;
 }
 
 int ub4j_delete_context(long ctx_id, char* error, size_t error_len) {
     // Acquire a write lock
-    if (pthread_rwlock_wrlock(&g_lock) != 0) {
+    if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
         snprintf(error, error_len, "Failed to acquire write lock.");
         return -1;
     }
@@ -92,13 +159,13 @@ int ub4j_delete_context(long ctx_id, char* error, size_t error_len) {
     long id = (long)ctx_id;
     struct ub4j_context *ctx = NULL;
     HASH_FIND_INT(contexts, &id, ctx);
-    pthread_rwlock_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_ctx_lock);
     if (ctx != NULL) {
         HASH_DEL(contexts, ctx);
     }
 
     // Release the lock
-    pthread_rwlock_unlock(&g_lock);
+    pthread_rwlock_unlock(&g_ctx_lock);
 
     // Nothing to do if there was no context found
     if (ctx == NULL) {
@@ -139,17 +206,24 @@ void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result)
                                      (uint16_t) result->qtype);
         }
     }
-    // free the result
-    ub_resolve_free(result);
+
+    const char* err_str  = NULL;
+    if (err != 0) {
+        err_str = ub_strerror(err);
+    }
+
+    if (result != NULL) {
+        ub_resolve_free(result);
+    }
 
     // issue the delegate callback
-    callback_context->callback(callback_context->userdata, hostname);
+    callback_context->callback(callback_context->userdata, err_str, hostname);
     free(callback_context);
 }
 
-int ub4j_reverse_lookup(long ctx_id, unsigned char* addr, size_t addr_len, void* userdata, ub4j_callback_type callback, char* error, size_t error_len) {
+int ub4j_reverse_lookup(long ctx_id, uint8_t* addr, size_t addr_len, void* userdata, ub4j_callback_type callback, char* error, size_t error_len) {
     // Acquire a read lock
-    if (pthread_rwlock_rdlock(&g_lock) != 0) {
+    if (pthread_rwlock_rdlock(&g_ctx_lock) != 0) {
         snprintf(error, error_len, "Failed to acquire read lock.");
         return -1;
     }
@@ -158,15 +232,36 @@ int ub4j_reverse_lookup(long ctx_id, unsigned char* addr, size_t addr_len, void*
     long id = (long)ctx_id;
     struct ub4j_context *ctx = NULL;
     HASH_FIND_INT(contexts, &id, ctx);
-    pthread_rwlock_unlock(&g_lock);
+
+    // Release the read lock
+    pthread_rwlock_unlock(&g_ctx_lock);
     if (ctx == NULL) {
         snprintf(error, error_len, "Invalid context id.");
+        return -1;
+    }
+
+    // Convert the IP address to a name used for reverse lookups i.e.:
+    //  192.0.2.5 -> 5.2.0.192.in-addr.arpa.
+    //  2001:db8::567:89ab -> b.a.9.8.7.6.5.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa.
+    char* reverse_lookup_domain;
+    if (addr_len == 4) {
+        build_reverse_lookup_domain_v4((struct in_addr*)addr, &reverse_lookup_domain);
+    } else if (addr_len == 16) {
+        build_reverse_lookup_domain_v6((struct in6_addr*)addr, &reverse_lookup_domain);
+    } else {
+        snprintf(error, error_len, "Invalid IP address length: %zu", addr_len);
+        return -1;
+    }
+
+    if (reverse_lookup_domain == NULL) {
+        snprintf(error, error_len, "Failed to allocate memory for reverse lookup domain.");
         return -1;
     }
 
     ub4j_callback_context* callback_context = malloc(sizeof(ub4j_callback_context));
     if (callback_context == NULL) {
         snprintf(error, error_len, "Failed to allocate memory for callback context.");
+        free(reverse_lookup_domain);
         return -1;
     }
 
@@ -175,18 +270,20 @@ int ub4j_reverse_lookup(long ctx_id, unsigned char* addr, size_t addr_len, void*
     callback_context->callback = callback;
 
     // Issue the reverse lookup
-    char target[256];
-    snprintf(target, 256, "%d.%d.%d.%d.in-addr.arpa.", addr[3], addr[2], addr[1], addr[0]);
-    int retval = ub_resolve_async(ctx->ub_ctx, target,
+    int nret = ub_resolve_async(ctx->ub_ctx, reverse_lookup_domain,
                               12 /* RR_TYPE_PTR */,
                               1 /* CLASS IN (internet) */,
                               callback_context,
                               ub_reverse_lookup_callback,
                               NULL);
-    if (retval) {
+
+    // We done with the domain name now
+    free(reverse_lookup_domain);
+
+    if (nret) {
         // Free the callback context
         free(callback_context);
-        snprintf(error, error_len, "Resolve error: %s", ub_strerror(retval));
+        snprintf(error, error_len, "Resolve error: %s", ub_strerror(nret));
         return -1;
     }
 

@@ -34,8 +34,8 @@ import java.util.concurrent.CompletableFuture;
 
 public interface Unbound4j {
 
-    UnboundContext newContext(UnboundConfig config);
+    Unbound4jContext newContext(Unbound4jConfig config);
 
-    CompletableFuture<Optional<String>> reverseLookup(UnboundContext ctx, final InetAddress addr);
+    CompletableFuture<Optional<String>> reverseLookup(Unbound4jContext ctx, final InetAddress addr);
 
 }

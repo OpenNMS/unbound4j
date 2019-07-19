@@ -31,7 +31,7 @@ package org.opennms.unbound4j.api;
 /**
  * NOTE: Any outstanding async queries are killed and callbacks are not called for them when the context is closed.
  */
-public interface UnboundContext extends AutoCloseable {
+public interface Unbound4jContext extends AutoCloseable {
 
     long getId();
 
