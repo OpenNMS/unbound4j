@@ -1,0 +1,29 @@
+# Debian
+debian/*.log
+debian/files
+debian/unbound4j*
+debian/substvars
+
+# CMake
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+install_manifest.txt
+cmake-build-debug
+
+# Build/target folders
+build/
+dist/
+tmp/
+
+# Generated headers
+config.h
+jni/include/unbound4j_java_interface.h
+
+# Editors
+.idea
+.settings
+.classpath
+.project
+java/bin/
