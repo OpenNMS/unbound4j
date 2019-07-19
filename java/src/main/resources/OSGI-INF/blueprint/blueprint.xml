@@ -4,8 +4,8 @@
            xsi:schemaLocation="http://www.osgi.org/xmlns/blueprint/v1.0.0 http://www.osgi.org/xmlns/blueprint/v1.0.0/blueprint.xsd"
 >
 
-    <bean id="asyncDnsJni" class="org.opennms.netmgt.asyncdns4j.impl.AsyncDnsJniImpl" />
+    <bean id="unbound4j" class="org.opennms.unbound4j.impl.Unbound4jImpl" />
 
-    <service ref="asyncDnsJni" interface="org.opennms.netmgt.asyncdns4j.api.AsyncDns" />
+    <service ref="unbound4j" interface="org.opennms.unbound4j.api.Unbound4j" />
 
 </blueprint>
