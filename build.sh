@@ -38,5 +38,5 @@ make
 # Run the tests and create the .jar
 cd ../java
 mvn package || (echo "Build failed." && exit 1)
-cp target/asyncdns4j-*.jar ../dist/
+cp target/unbound4j-*.jar ../dist/
 popd
