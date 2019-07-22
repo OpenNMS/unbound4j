@@ -3,7 +3,7 @@
 //
 
 #include <stdio.h>
-#include <zconf.h>
+#include <stdarg.h>
 #include <ctype.h>
 #include "sldns.h"
 

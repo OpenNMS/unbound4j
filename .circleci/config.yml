@@ -20,8 +20,10 @@ jobs:
             - ~/.m2
           key: v1-dependencies-{{ checksum "java/pom.xml" }}
       - run: |
-         cd java
-         mvn install
+         sudo apt update
+         sudo apt install -y libunbound-dev libssl-dev pkg-config cmake
+      - run: |
+         ./build.sh
 
 workflows:
   version: 2

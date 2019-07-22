@@ -15,7 +15,7 @@ include_directories(${JNI_INCLUDE_DIRS})
 
 # libunbound
 INCLUDE(FindPkgConfig)
-pkg_check_modules (LIBUNBOUND REQUIRED libunbound>=1.8.0)
+pkg_check_modules (LIBUNBOUND REQUIRED libunbound>=1.6.0)
 message (STATUS "LIBUNBOUND_LIBRARIES=${LIBUNBOUND_LIBRARIES}")
 message (STATUS "LIBUNBOUND_LIBRARY_DIRS=${LIBUNBOUND_LIBRARY_DIRS}")
 if (NOT "${LIBUNBOUND_LIBRARY_DIRS}" STREQUAL "")
