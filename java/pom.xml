@@ -96,7 +96,7 @@
         <!-- Fix the Surefire version -->
         <plugin>
             <groupId>org.apache.maven.surefire</groupId>
-            <artifactId>surefire</artifactId>
+            <artifactId>maven-surefire-plugin</artifactId>
             <version>2.22.2</version>
         </plugin>
     </plugins>
