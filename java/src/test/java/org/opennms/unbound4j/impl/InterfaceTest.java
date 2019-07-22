@@ -37,8 +37,6 @@ import static org.hamcrest.Matchers.nullValue;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,15 +65,6 @@ public class InterfaceTest {
 
     @BeforeClass
     public static void setUpClass() {
-        librarySearch: for (final String prefix : new String[] { "", "lib" }) {
-            for (final String suffix : new String[] { ".so", ".dll", ".jnilib" }) {
-                final Path library = Paths.get(System.getProperty("user.dir"), "..", "dist", prefix + "unbound4j" + suffix);
-                if (library.toFile().exists()) {
-                    System.setProperty("opennms.library.unbound4j", library.toString());
-                    break librarySearch;
-                }
-            }
-        }
         Interface.init();
     }
     

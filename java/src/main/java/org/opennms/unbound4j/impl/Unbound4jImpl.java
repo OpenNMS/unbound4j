@@ -38,10 +38,6 @@ import org.opennms.unbound4j.api.Unbound4jContext;
 
 public class Unbound4jImpl implements Unbound4j {
 
-    public Unbound4jImpl() {
-        Interface.init();
-    }
-
     @Override
     public Unbound4jContext newContext(Unbound4jConfig config) {
         return new Unbound4jContextImpl(Interface.create_context(config));
@@ -51,4 +47,5 @@ public class Unbound4jImpl implements Unbound4j {
     public CompletableFuture<Optional<String>> reverseLookup(Unbound4jContext ctx, InetAddress addr) {
         return Interface.reverse_lookup(ctx.getId(), addr.getAddress()).thenApply(Optional::ofNullable);
     }
+
 }

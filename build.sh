@@ -35,6 +35,10 @@ cd ../build
 cmake ../jni/
 make
 
+# Copy the shared library over to the Java build
+mkdir -p ../java/src/main/resources/org/opennms/unbound4j/native/linux-x86_64/
+cp ../dist/libunbound4j.so ../java/src/main/resources/org/opennms/unbound4j/native/linux-x86_64/
+
 # Run the tests and create the .jar
 cd ../java
 mvn package || (echo "Build failed." && exit 1)

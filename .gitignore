@@ -27,3 +27,6 @@ jni/include/unbound4j_java_interface.h
 .classpath
 .project
 java/bin/
+
+# Binaries
+*.so

@@ -67,6 +67,8 @@
 #pragma export reset
 #endif
 
+#include <unbound.h>
+
 #include "jniutils.h"
 #include "unbound4j.h"
 
@@ -87,6 +89,10 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
     fflush(stdout);
 
     ub4j_destroy();
+}
+
+JNIEXPORT jstring JNICALL Java_org_opennms_unbound4j_impl_Interface_version(JNIEnv *env, jclass clazz) {
+    return (*env)->NewStringUTF(env, ub_version());
 }
 
 JNIEXPORT jlong JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1context(JNIEnv *env, jclass clazz, jobject config) {

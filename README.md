@@ -7,7 +7,7 @@ It was developed in order to perform reverse lookups at high rates (tens of thou
 Building
 --------
 
-Requires maven (tested with 3.5.2) and cmake (tested with 3.14.5)
+Requires Maven (tested with 3.5.2) and CMake (tested with 3.14.5)
 
 ```sh
 ./build.sh
