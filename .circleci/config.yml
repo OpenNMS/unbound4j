@@ -50,6 +50,9 @@ jobs:
           keys:
           - v1-dependencies-{{ checksum "java/pom.xml" }}
           - v1-dependencies-
+     - run: |
+         sudo apt update
+         sudo apt install -y libunbound libssl
       - run:
           name: Deploy the artifacts
           command: |
