@@ -21,10 +21,12 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Helper class for loading the TensorFlow Java native library.
+ * Helper class for loading the unbound4j Java native library.
  *
- * <p>The Java TensorFlow bindings require a native (JNI) library. This library
- * (libtensorflow_jni.so on Linux, libtensorflow_jni.dylib on OS X, tensorflow_jni.dll on Windows)
+ * (Shameless copied from TensorFlow)
+ *
+ * <p>The Java unbound4j bindings require a native (JNI) library. This library
+ * (libunbound4j.so on Linux, libunbound4j.dylib on OS X, libunbound4j.dll on Windows)
  * can be made available to the JVM using the java.library.path System property (e.g., using
  * -Djava.library.path command-line argument). However, doing so requires an additional step of
  * configuration.
@@ -35,9 +37,7 @@ import java.io.InputStream;
  *
  * <p>NativeLibrary.load() takes care of this. First looking for the library in java.library.path
  * and failing that, it tries to find the OS and architecture specific version of the library in the
- * set of ClassLoader resources (under org/tensorflow/native/OS-ARCH). The resources paths used for
- * lookup must be consistent with any packaging (such as on Maven Central) of the TensorFlow Java
- * native libraries.
+ * set of ClassLoader resources (under org/opennms/unbound4j/native/OS-ARCH).
  */
 final class NativeLibrary {
     private static final boolean DEBUG =
@@ -140,7 +140,7 @@ final class NativeLibrary {
 
     private static void log(String msg) {
         if (DEBUG) {
-            System.err.println("org.tensorflow.NativeLibrary: " + msg);
+            System.err.println("org.unbound4j.NativeLibrary: " + msg);
         }
     }
 

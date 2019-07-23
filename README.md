@@ -1,4 +1,4 @@
-# unbound4j
+# unbound4j [![CircleCI](https://circleci.com/gh/OpenNMS/unbound4j.svg?style=svg)](https://circleci.com/gh/OpenNMS/unbound4j)
 
 unbound4j is a high throughput DNS resolution engine for Java application that leverages [libunbound](https://nlnetlabs.nl/documentation/unbound/libunbound/).
 

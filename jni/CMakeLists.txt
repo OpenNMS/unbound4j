@@ -56,4 +56,3 @@ target_link_libraries(unbound4j unbound)
 add_executable(unbound4j_main src/main.c src/sldns.c src/unbound4j.c src/dnsutils.c src/dnsutils.h)
 target_link_libraries(unbound4j_main unbound)
 target_link_libraries(unbound4j_main pthread)
-

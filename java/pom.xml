@@ -4,9 +4,21 @@
   <artifactId>unbound4j</artifactId>
   <version>1.0.0-SNAPSHOT</version>
   <name>unbound4j</name>
+  <url>https://github.com/OpenNMS/unbound4j</url>
+  <description>High-throughput DNS resolution for Java using libunbound</description>
   <packaging>bundle</packaging>
 
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
   <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
     <jdk.version>1.8</jdk.version>
     <slf4j.version>1.7.26</slf4j.version>
   </properties>
@@ -99,6 +111,17 @@
             <artifactId>maven-surefire-plugin</artifactId>
             <version>2.22.2</version>
         </plugin>
+        <plugin>
+            <groupId>org.sonatype.plugins</groupId>
+            <artifactId>nexus-staging-maven-plugin</artifactId>
+            <version>1.6.8</version>
+            <extensions>true</extensions>
+            <configuration>
+                <serverId>opennms-ossrh</serverId>
+                <nexusUrl>https://oss.sonatype.org/</nexusUrl>
+                <autoReleaseAfterClose>true</autoReleaseAfterClose>
+            </configuration>
+        </plugin>
     </plugins>
     <pluginManagement>
         <plugins>
@@ -125,7 +148,25 @@
             </plugin>
         </plugins>
     </pluginManagement>
+    <extensions>
+        <extension>
+            <groupId>org.apache.maven.wagon</groupId>
+            <artifactId>wagon-ssh-external</artifactId>
+            <version>3.1.0</version>
+        </extension>
+    </extensions>
   </build>
+
+  <distributionManagement>
+      <snapshotRepository>
+          <id>opennms-ossrh</id>
+          <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+      </snapshotRepository>
+      <repository>
+          <id>opennms-ossrh</id>
+          <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+      </repository>
+  </distributionManagement>
 
   <dependencies>
       <dependency>
