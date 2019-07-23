@@ -35,12 +35,14 @@ public class Unbound4jConfig {
         private boolean useSystemResolver = true;
         private String unboundConfig;
 
-        public void useSystemResolver(boolean useSystemResolver) {
+        public Builder useSystemResolver(boolean useSystemResolver) {
             this.useSystemResolver = useSystemResolver;
+            return this;
         }
 
-        public void withUnboundConfig(String unboundConfig) {
+        public Builder withUnboundConfig(String unboundConfig) {
             this.unboundConfig = unboundConfig;
+            return this;
         }
 
         public Unbound4jConfig build() {
