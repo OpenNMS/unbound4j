@@ -52,7 +52,7 @@ jobs:
           - v1-dependencies-
       - run: |
          sudo apt update
-         sudo apt install -y libunbound libssl
+         sudo apt install -y libunbound-dev libssl-dev
       - run:
           name: Deploy the artifacts
           command: |
