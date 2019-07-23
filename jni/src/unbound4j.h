@@ -45,6 +45,4 @@ int ub4j_delete_context(long ctx_id, char* error, size_t error_len);
 
 int ub4j_reverse_lookup(long ctx_id, uint8_t* addr, size_t addr_len, void* mydata, ub4j_callback_type callback, char* error, size_t error_len);
 
-void ub4j_print_stats(long ctx_id);
-
 #endif //UNBOUND4J_UNBOUND4J_H

@@ -72,7 +72,6 @@ int main() {
     }
 
     sleep(1);
-    ub4j_print_stats(ctx->id);
 
     ub4j_destroy();
     return 0;

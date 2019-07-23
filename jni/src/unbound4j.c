@@ -53,37 +53,6 @@ void ub4j_destroy() {
 
 void* context_processing_thread(void *arg);
 
-void ub4j_print_stats(long ctx_id) {
-    struct ub_stats_info* stats;
-    struct ub_shm_stat_info* shm_stat;
-    int id_ctl, id_arr;
-
-    // get shm segments
-    id_ctl = shmget(11777, sizeof(int), SHM_R|SHM_W);
-    if(id_ctl == -1) {
-        printf("shmget failed!");
-        return;
-    }
-    id_arr = shmget(11777+1, sizeof(int), SHM_R|SHM_W);
-    if(id_arr == -1) {
-        printf("shmget failed!!");
-        return;
-    }
-    shm_stat = (struct ub_shm_stat_info*)shmat(id_ctl, NULL, 0);
-    if(shm_stat == (void*)-1) {
-        printf("shmat failed!");
-        return;
-    }
-    stats = (struct ub_stats_info*)shmat(id_arr, NULL, 0);
-    if(stats == (void*)-1) {
-        printf("shmat failed!!");
-        return;
-    }
-
-    shmdt(shm_stat);
-    shmdt(stats);
-}
-
 struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error, size_t error_len) {
     int retval;
     struct ub4j_context *ctx = malloc(sizeof(struct ub4j_context));
@@ -124,12 +93,6 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
         }
         pthread_mutex_unlock(&g_cfg_lock);
     }
-
-    /* Enable statistics?
-    ub_ctx_set_option(ctx->ub_ctx, "statistics-interval:", "1");
-    ub_ctx_set_option(ctx->ub_ctx, "shm-enable:", "yes");
-    ub_ctx_set_option(ctx->ub_ctx, "shm-key:", "11777");
-    */
 
     ctx->ub_fd = ub_fd(ctx->ub_ctx);
     if (ctx->ub_fd < 0) {
