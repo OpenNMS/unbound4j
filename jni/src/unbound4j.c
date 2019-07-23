@@ -159,7 +159,6 @@ int ub4j_delete_context(long ctx_id, char* error, size_t error_len) {
     long id = (long)ctx_id;
     struct ub4j_context *ctx = NULL;
     HASH_FIND_INT(contexts, &id, ctx);
-    pthread_rwlock_unlock(&g_ctx_lock);
     if (ctx != NULL) {
         HASH_DEL(contexts, ctx);
     }
