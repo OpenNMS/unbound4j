@@ -28,12 +28,16 @@
 
 package org.opennms.unbound4j.impl;
 
+import static org.awaitility.Awaitility.await;
+import static org.hamcrest.CoreMatchers.equalTo;
+
 import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -56,10 +60,11 @@ public class Unbound4jImplTest {
     Unbound4jContext ctx = ub4j.newContext(Unbound4jConfig.newBuilder()
             .useSystemResolver(false)
             .withUnboundConfig("/tmp/unbound.conf")
+            .withRequestTimeout(5, TimeUnit.SECONDS)
             .build());
 
     Cache<InetAddress, Optional<String>> cache = CacheBuilder.newBuilder()
-            .expireAfterWrite(30, TimeUnit.SECONDS)
+            .expireAfterWrite(1, TimeUnit.MINUTES)
             .build();
 
     private final Random r = new Random(1);
@@ -97,7 +102,7 @@ public class Unbound4jImplTest {
                                 System.out.printf("Reverse lookup for %s completed successfully in %dms with: %s\n", addr, stopwatch.elapsed(TimeUnit.MILLISECONDS), hostnameFromDns);
                                 responseSuccess.mark();
                             } else {
-                                System.out.printf("Reverse lookup for %s failed after %dms with: %s.\n", addr, stopwatch.elapsed(TimeUnit.MILLISECONDS), ex);
+                                System.out.printf("Reverse lookup for %s failed after %dms with: %s\n", addr, stopwatch.elapsed(TimeUnit.MILLISECONDS), ex);
                                 responseFailed.mark();
                             }
                         });
@@ -110,13 +115,11 @@ public class Unbound4jImplTest {
 
     @Test
     public void canPerformReverseLookupsWithManyThreads() throws Exception {
-
         ConsoleReporter reporter = ConsoleReporter.forRegistry(metrics)
                 .convertRatesTo(TimeUnit.SECONDS)
                 .convertDurationsTo(TimeUnit.MILLISECONDS)
                 .build();
         reporter.start(5, TimeUnit.SECONDS);
-
 
         List<Thread> threads = new LinkedList<>();
         for (int i = 0; i < 12; i++) {
@@ -125,13 +128,16 @@ public class Unbound4jImplTest {
             threads.add(t);
         }
 
-        Thread.sleep(TimeUnit.MINUTES.toMillis(60));
+        Thread.sleep(TimeUnit.MINUTES.toMillis(1));
 
+        // Stop the threads
         stop.set(true);
-
         for (Thread t : threads) {
             t.join();
         }
+
+        // Wait until all the requests have completed
+        await().atMost(30, TimeUnit.SECONDS).until(request::getCount, equalTo(responseCached.getCount() + responseSuccess.getCount() + responseFailed.getCount()));
     }
 
     private AtomicInteger nextIpAddress = new AtomicInteger(16843009); // Start at 1.1.1.1

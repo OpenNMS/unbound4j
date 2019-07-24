@@ -22,6 +22,7 @@
 struct ub4j_config {
     short use_system_resolver;
     const char* unbound_config;
+    int request_timeout_secs;
 };
 
 struct ub4j_context {
@@ -30,6 +31,7 @@ struct ub4j_context {
     int ub_fd;
     pthread_t thread_id;
     volatile short stopping;
+    int request_timeout_secs;
     UT_hash_handle hh; // makes this structure hashable
 };
 
@@ -38,6 +40,8 @@ typedef void (*ub4j_callback_type)(void*, const char*, char*);
 void ub4j_init();
 
 void ub4j_destroy();
+
+void ub4j_config_init(struct ub4j_config* config);
 
 struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error, size_t error_len);
 

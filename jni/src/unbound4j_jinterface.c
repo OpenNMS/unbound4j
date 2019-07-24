@@ -71,7 +71,7 @@ struct ub4j_java_callback_context {
 JavaVM* g_vm;
 
 jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    printf("unbound4j: Loaded\n");
+    printf("unbound4j: Loaded with libunbound v%s\n", ub_version());
     fflush(stdout);
     g_vm = vm;
 
@@ -152,6 +152,14 @@ JNIEXPORT jint JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1context
         return -1;
     }
 
+    //  public int getRequestTimeoutSeconds();
+    //    descriptor: ()I
+    jmethodID getRequestTimeoutSecondsMethod = (*env)->GetMethodID(env, unbound4jConfigClazz, "getRequestTimeoutSeconds", "()I");
+    if (getRequestTimeoutSecondsMethod == NULL) {
+        throwRuntimeException(env, "getRequestTimeoutSeconds method not found.");
+        return -1;
+    }
+
     ub4jconf.use_system_resolver = (*env)->CallBooleanMethod(env, config, isUseSystemResolverMethod);
     jobject unboundConfig = (*env)->CallObjectMethod(env, config, getUnboundConfigMethod);
     const char *unboundConfigStr = NULL;
@@ -159,6 +167,7 @@ JNIEXPORT jint JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1context
         unboundConfigStr = (*env)->GetStringUTFChars(env, unboundConfig, NULL);
     }
     ub4jconf.unbound_config = unboundConfigStr;
+    ub4jconf.request_timeout_secs = (*env)->CallIntMethod(env, config, getRequestTimeoutSecondsMethod);
 
     char error_str[256];
     size_t error_str_len = sizeof(error_str);
@@ -189,9 +198,6 @@ JNIEXPORT void JNICALL Java_org_opennms_unbound4j_impl_Interface_delete_1context
 void callback(void* mydata, const char* err_str, char* result) {
     struct ub4j_java_callback_context* ctx = (struct ub4j_java_callback_context*)mydata;
 
-    clock_t t;
-    t = clock();
-    printf("Start callback.\n");
     // We can't share the JNIEnv reference between threads, so we need to grab a new one here
     JNIEnv *env;
     int getEnvStat = (*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_8);
@@ -232,11 +238,6 @@ void callback(void* mydata, const char* err_str, char* result) {
         if (result != NULL) {
             free(result);
         }
-
-    t = clock() - t;
-    double time_taken = ((double)t)/CLOCKS_PER_SEC*1000; // in seconds
-    printf("Done callback in %fms.\n", time_taken);
-    fflush(stdout);
 }
 
 JNIEXPORT jobject JNICALL Java_org_opennms_unbound4j_impl_Interface_reverse_1lookup(JNIEnv *env, jclass clazz, jint ctx_id, jbyteArray addr_bytes) {

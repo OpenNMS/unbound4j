@@ -17,29 +17,59 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <unbound.h>
 
 #include "unbound4j.h"
 
-volatile short got_callback = 0;
+/*
+ * Used to generate a large number of reverse lookup requests to
+ * test the system under load.
+ */
+
+volatile int done = 0;
+atomic_int ip_generator = ATOMIC_VAR_INIT(16843009); // Start at 1.1.1.1
 
 void callback(void* mydata, const char* err_str, char* result) {
     if (err_str != NULL) {
-        printf("Error: %s", err_str);
+        printf("Error: %s\n", err_str);
     } else if (result != NULL) {
-        unsigned char* addr = (unsigned char*)mydata;
-        printf("%d.%d.%d.%d = %s\n", addr[3], addr[2], addr[1], addr[0], result);
+        printf("Result: %s\n", result);
         free(result);
     } else {
-        printf("(No result)");
+        printf("(No result)\n");
     }
-    got_callback = 1;
+}
+
+void *thread_routine_r( void *arg ) {
+    struct ub4j_context* ctx = (struct ub4j_context*)arg;
+
+    char error_str[256];
+    size_t error_len = sizeof(error_str);
+    while(!done) {
+        // Generate 3 IP address
+        int ips[3];
+        ips[0] = atomic_fetch_add(&ip_generator, 1);
+        ips[1] = atomic_fetch_add(&ip_generator, 1);
+        ips[2] = atomic_fetch_add(&ip_generator, 1);
+
+        // Perform lookups for each of these
+        for (int i = 0; i < 3; i++) {
+            if (ub4j_reverse_lookup(ctx->id, (uint8_t*)(&(ips[i])), 4, NULL, callback, error_str, error_len)) {
+                printf("lookup failed: %s", error_str);
+            }
+        }
+    }
 }
 
 int main() {
     ub4j_init();
 
+    printf("libunbound v%s\n", ub_version());
+
     struct ub4j_config config;
-    memset(&config, 0, sizeof(struct ub4j_config));
+    ub4j_config_init(&config);
 
     char error[256];
     size_t  error_len = sizeof(error);
@@ -51,27 +81,27 @@ int main() {
         return 1;
     }
 
-    //uint8_t addr[] = {1, 1, 1, 1};
-    uint8_t addr[] = {192, 51, 100, 1};
-    printf("Issuing reverse lookup for: %d.%d.%d.%d\n", addr[0], addr[1], addr[2], addr[3]);
-    if (ub4j_reverse_lookup(ctx->id, addr, sizeof(addr), addr, callback, error, error_len)) {
-        printf("Failed to issue reverse lookup: %s\n", error);
-        ub4j_delete_context(ctx->id, error, error_len);
-        ub4j_destroy();
-        return 1;
-    }
-
-    while (1 > 0) {
-        sleep(1);
-        if (got_callback) {
-            break;
-        } else {
-            printf(".");
-            fflush(stdout);
+    // Spawn the lookup threads
+    const int NUM_THREADS = 12;
+    pthread_t dns_lookup_threads[NUM_THREADS];
+    int status;
+    for (int i = 0; i < NUM_THREADS; i++) {
+        if (( status = pthread_create( &(dns_lookup_threads[i]), NULL, thread_routine_r, ctx) )) {
+            printf("failure: status %d\n", status);
+            return 1;
         }
     }
 
-    sleep(1);
+    // Wait
+    sleep(10);
+
+    // Stop
+    done = 1;
+    for (int i = 0; i < NUM_THREADS; i++) {
+        void *thread_result;
+        status = pthread_join( dns_lookup_threads[i], &thread_result );
+        printf("thread result: %d %ld\n", status, (long)thread_result);
+    }
 
     ub4j_destroy();
     return 0;

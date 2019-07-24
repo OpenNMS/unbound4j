@@ -17,21 +17,38 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <unbound.h>
-#include <sys/shm.h>
 #include <stdatomic.h>
+#include <sys/time.h>
 
 #include "uthash.h"
 #include "unbound4j.h"
 #include "sldns.h"
 #include "dnsutils.h"
 
-struct ub4j_context *contexts = NULL;
+struct ub4j_query {
+    int id;
+    void* userdata;
+    ub4j_callback_type callback;
+    __time_t expires_at_epoch_sec;
+    unsigned char expired;
+    UT_hash_handle hh; // makes this structure hashable
+};
+
+struct ub4j_context *g_contexts = NULL;
 atomic_int g_ctx_id_generator = ATOMIC_VAR_INIT(1);
+
+struct ub4j_query *g_queries = NULL;
+
 pthread_rwlock_t g_ctx_lock;
+pthread_rwlock_t g_query_lock;
 pthread_mutex_t g_cfg_lock;
 
 void ub4j_init() {
     if (pthread_rwlock_init(&g_ctx_lock, NULL) != 0) {
+        printf("unbound4j: Error while initializing read-write lock.\n");
+    }
+
+    if (pthread_rwlock_init(&g_query_lock, NULL) != 0) {
         printf("unbound4j: Error while initializing read-write lock.\n");
     }
 
@@ -54,8 +71,8 @@ void ub4j_destroy() {
 
     // Delete all outstanding contexts
     struct ub4j_context *ctx, *tmp;
-    HASH_ITER(hh, contexts, ctx, tmp) {
-        HASH_DEL(contexts, ctx);
+    HASH_ITER(hh, g_contexts, ctx, tmp) {
+        HASH_DEL(g_contexts, ctx);
         if(ub4j_free_context(ctx, error, error_len)) {
             printf("unbound4j: Deleting context failed: %s", error);
         }
@@ -63,6 +80,12 @@ void ub4j_destroy() {
 
     // Release the lock
     pthread_rwlock_unlock(&g_ctx_lock);
+}
+
+void ub4j_config_init(struct ub4j_config* config) {
+    config->request_timeout_secs = 5;
+    config->use_system_resolver = 1;
+    config->unbound_config = NULL;
 }
 
 void* context_processing_thread(void *arg);
@@ -108,6 +131,9 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
         pthread_mutex_unlock(&g_cfg_lock);
     }
 
+    // Enable debugging
+    // ub_ctx_debuglevel(ctx->ub_ctx, 3);
+
     // Use a thread instead of forking
     if (ub_ctx_async(ctx->ub_ctx, 1)) {
         snprintf(error, error_len, "Failed to configure asynchronous behaviour on Unbound context.");
@@ -129,8 +155,11 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
         return NULL;
     }
 
-    // Use the thread id as the context id, since this will be unique
+    // Generate a unique context id
     ctx->id = atomic_fetch_add(&g_ctx_id_generator, 1);
+
+    // Store the configuration settings that we'll need later
+    ctx->request_timeout_secs = config->request_timeout_secs;
 
     // Store the context
     if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
@@ -140,7 +169,7 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
         return NULL;
     }
 
-    HASH_ADD_INT(contexts, id, ctx);
+    HASH_ADD_INT(g_contexts, id, ctx);
     pthread_rwlock_unlock(&g_ctx_lock);
     return ctx;
 }
@@ -155,9 +184,9 @@ int ub4j_delete_context(int ctx_id, char* error, size_t error_len) {
     // Lookup the context by id and remove it from the hashmap if found
     int id = ctx_id;
     struct ub4j_context *ctx = NULL;
-    HASH_FIND_INT(contexts, &id, ctx);
+    HASH_FIND_INT(g_contexts, &id, ctx);
     if (ctx != NULL) {
-        HASH_DEL(contexts, ctx);
+        HASH_DEL(g_contexts, ctx);
     }
 
     // Release the lock
@@ -183,22 +212,13 @@ int ub4j_free_context(struct ub4j_context *ctx, char* error, size_t error_len) {
 
     // Delete the Unbound context
     ub_ctx_delete(ctx->ub_ctx);
-
     // Free up the ub4j context structure
     free(ctx);
     return nret;
 }
 
-typedef struct {
-    void* userdata;
-    ub4j_callback_type callback;
-} ub4j_callback_context;
-
 void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result) {
-    printf("got callback for: %s\n", result != NULL ? result->qname : NULL);
-    fflush(stdout);
-
-    ub4j_callback_context* callback_context = (ub4j_callback_context*)mydata;
+    struct ub4j_query* query = (struct ub4j_query*)mydata;
 
     char* hostname = NULL;
     if (err == 0 && result != NULL) {
@@ -213,16 +233,31 @@ void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result)
 
     const char* err_str  = NULL;
     if (err != 0) {
-        err_str = ub_strerror(err);
+        if (query->expired) {
+            err_str = "Query timed out.";
+        } else {
+            err_str = ub_strerror(err);
+        }
     }
 
     if (result != NULL) {
         ub_resolve_free(result);
     }
 
-    // issue the delegate callback
-    callback_context->callback(callback_context->userdata, err_str, hostname);
-    free(callback_context);
+    // Issue the delegate callback
+    query->callback(query->userdata, err_str, hostname);
+
+    // Stop tracking the query
+    if (!query->expired) {
+        if (!pthread_rwlock_wrlock(&g_query_lock)) {
+            HASH_DEL(g_queries, query);
+            pthread_rwlock_unlock(&g_query_lock);
+        } else {
+            printf("unbound4j: Failed to acquire write lock.");
+        }
+    }
+
+    free(query);
 }
 
 int ub4j_reverse_lookup(int ctx_id, uint8_t* addr, size_t addr_len, void* userdata, ub4j_callback_type callback, char* error, size_t error_len) {
@@ -235,7 +270,7 @@ int ub4j_reverse_lookup(int ctx_id, uint8_t* addr, size_t addr_len, void* userda
     // Lookup the context by id
     int id = (int)ctx_id;
     struct ub4j_context *ctx = NULL;
-    HASH_FIND_INT(contexts, &id, ctx);
+    HASH_FIND_INT(g_contexts, &id, ctx);
 
     // Release the read lock
     pthread_rwlock_unlock(&g_ctx_lock);
@@ -262,41 +297,59 @@ int ub4j_reverse_lookup(int ctx_id, uint8_t* addr, size_t addr_len, void* userda
         return -1;
     }
 
-    ub4j_callback_context* callback_context = malloc(sizeof(ub4j_callback_context));
-    if (callback_context == NULL) {
-        snprintf(error, error_len, "Failed to allocate memory for callback context.");
+    struct ub4j_query* query = malloc(sizeof(struct ub4j_query));
+    if (query == NULL) {
+        snprintf(error, error_len, "Failed to allocate memory for query context.");
         free(reverse_lookup_domain);
         return -1;
     }
 
-    memset(callback_context, 0, sizeof(ub4j_callback_context));
-    callback_context->userdata = userdata;
-    callback_context->callback = callback;
+    memset(query, 0, sizeof(struct ub4j_query));
+    query->userdata = userdata;
+    query->callback = callback;
 
-    // Issue the reverse lookup
-    int async_id;
-    int nret = ub_resolve_async(ctx->ub_ctx, reverse_lookup_domain,
-                              12 /* RR_TYPE_PTR */,
-                              1 /* CLASS IN (internet) */,
-                              callback_context,
-                              ub_reverse_lookup_callback,
-                              &async_id);
-
-    // We done with the domain name now
-    free(reverse_lookup_domain);
-
-    if (nret) {
-        // Free the callback context
-        free(callback_context);
-        snprintf(error, error_len, "Resolve error: %s", ub_strerror(nret));
+    // Grab a write lock for the query tracking *before* we actually make the call
+    if (pthread_rwlock_wrlock(&g_query_lock) != 0) {
+        snprintf(error, error_len, "Failed to acquire write lock.");
         return -1;
     }
 
-    return 0;
+    // Set the expiry time
+    struct timeval tv_now;
+    gettimeofday(&tv_now, NULL);
+    query->expires_at_epoch_sec = tv_now.tv_sec + ctx->request_timeout_secs;
+
+    // Issue the reverse lookup
+    int nret = ub_resolve_async(ctx->ub_ctx, reverse_lookup_domain,
+                              12 /* RR_TYPE_PTR */,
+                              1 /* CLASS IN (internet) */,
+                              query,
+                              ub_reverse_lookup_callback,
+                              &query->id);
+
+    // We're done with the domain name now
+    free(reverse_lookup_domain);
+
+    if (nret) {
+        // The async query failed to be submitted, free the query context
+        free(query);
+        snprintf(error, error_len, "Resolve error: %s", ub_strerror(nret));
+    } else {
+        // The async query was successfully submitted, let's track it
+        HASH_ADD_INT(g_queries, id, query);
+    }
+
+    // Release the write lock
+    pthread_rwlock_unlock(&g_query_lock);
+
+    return nret;
 }
 
 void* context_processing_thread(void *arg) {
     struct ub4j_context *ctx = (struct ub4j_context *)arg;
+
+
+    struct ub4j_query *query, *query_tmp;
 
     struct timeval tv;
     fd_set rfds;
@@ -308,10 +361,81 @@ void* context_processing_thread(void *arg) {
         tv.tv_usec = 0;
 
         int ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
-        if (ret >= 0) {
-            ub_process(ctx->ub_ctx);
+        if (ret > 0) {
+            if(ub_process(ctx->ub_ctx)) {
+                printf("unbound4j: ub_process() error!\n");
+            }
+        }
+
+        // Get the current time
+        struct timeval tv_now;
+        gettimeofday(&tv_now, NULL);
+
+        // Acquire a read lock
+        if (pthread_rwlock_rdlock(&g_query_lock) != 0) {
+            printf("Failed to acquire read lock.");
+            continue;
+        }
+
+        // Peek at the head of the list and determine whether or not we need to cancel any queries
+        unsigned char need_to_cancel_queries = 0;
+        query = g_queries;
+        if (query != NULL && query->expires_at_epoch_sec <= tv_now.tv_sec) {
+            need_to_cancel_queries = 1;
+        }
+
+        // Release our read lock
+        pthread_rwlock_unlock(&g_query_lock);
+
+        if (need_to_cancel_queries) {
+            // Acquire a write lock
+            if (pthread_rwlock_wrlock(&g_query_lock) != 0) {
+                printf("unbound4j: Failed to acquire write lock.");
+                continue;
+            }
+
+            // Iterate through the outstanding queries
+            HASH_ITER(hh, g_queries, query, query_tmp) {
+                if (query->expires_at_epoch_sec <= tv_now.tv_sec) {
+                    // Remove the item from the hash
+                    HASH_DEL(g_queries, query);
+                    // Cancel the query, no callback will be made by libunbound
+                    ub_cancel(ctx->ub_ctx, query->id);
+                    // Mark the query as expired
+                    query->expired = 1;
+                    // Issue the callback ourselves
+                    ub_reverse_lookup_callback(query, 1, NULL);
+                } else {
+                    break;
+                }
+            }
+
+            // Release our write lock
+            pthread_rwlock_unlock(&g_query_lock);
         }
     }
+
+    // We're stopping - clean up the outstanding queries
+
+    // Acquire a write lock
+    if (pthread_rwlock_wrlock(&g_query_lock) != 0) {
+        printf("unbound4j: Failed to acquire write lock.");
+    }
+
+    // Iterate through the outstanding queries
+    HASH_ITER(hh, g_queries, query, query_tmp) {
+        // Remove the item from the hash
+        HASH_DEL(g_queries, query);
+        // Cancel the query, no callback will be made by libunbound
+        ub_cancel(ctx->ub_ctx, query->id);
+        // Mark the query as expired
+        query->expired = 1;
+        // Issue the callback ourselves
+        ub_reverse_lookup_callback(query, 1, NULL);
+    }
+
+    // Release our write lock
+    pthread_rwlock_unlock(&g_query_lock);
 
     return NULL;
 }

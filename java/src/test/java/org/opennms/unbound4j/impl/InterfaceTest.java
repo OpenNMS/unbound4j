@@ -73,7 +73,7 @@ public class InterfaceTest {
         ctx = -1;
     }
 
-    @Test
+    @Test(timeout = 30000)
     public void canReverseLoookup() throws UnknownHostException, ExecutionException, InterruptedException {
         // IPv4
         byte[] addr = InetAddress.getByName("1.1.1.1").getAddress();
