@@ -18,6 +18,7 @@ package org.opennms.unbound4j.impl;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -28,9 +29,11 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.After;
 import org.junit.Before;
@@ -49,7 +52,7 @@ public class InterfaceTest {
     @Rule
     public TemporaryFolder tempFolder = new TemporaryFolder();
 
-    private long ctx;
+    private int ctx;
 
     @BeforeClass
     public static void setUpClass() {
@@ -58,7 +61,10 @@ public class InterfaceTest {
     
     @Before
     public void setUp() {
-        ctx = Interface.create_context(Unbound4jConfig.newBuilder().build());
+        ctx = Interface.create_context(Unbound4jConfig.newBuilder()
+                .useSystemResolver(false)
+                .withUnboundConfig("/tmp/unbound.conf")
+                .build());
     }
 
     @After
@@ -71,11 +77,11 @@ public class InterfaceTest {
     public void canReverseLoookup() throws UnknownHostException, ExecutionException, InterruptedException {
         // IPv4
         byte[] addr = InetAddress.getByName("1.1.1.1").getAddress();
-        assertThat(Interface.reverse_lookup(ctx, addr).get(), equalTo("one.one.one.one."));
+        assertThat(Interface.reverse_lookup(ctx, addr).get(), anyOf(equalTo("one.one.one.one."), nullValue()));
 
         // IPv6
         addr = InetAddress.getByName("2606:4700:4700::1111").getAddress();
-        assertThat(Interface.reverse_lookup(ctx, addr).get(), equalTo("one.one.one.one."));
+        assertThat(Interface.reverse_lookup(ctx, addr).get(), anyOf(equalTo("one.one.one.one."), nullValue()));
 
         // No result
         addr = InetAddress.getByName("198.51.100.1").getAddress();
@@ -114,5 +120,36 @@ public class InterfaceTest {
         // Validate
         assertThat(results, hasSize(1));
         assertThat(results, contains((String)null));
+    }
+
+    @Test
+    public void doIt() throws InterruptedException {
+        System.out.println(ctx);
+        Random r = new Random();
+        final AtomicBoolean stopped = new AtomicBoolean(false);
+        Runnable runnable = new Runnable() {
+            @Override
+            public void run() {
+                while(!stopped.get()) {
+                    long now = System.currentTimeMillis();
+                    Interface.reverse_lookup(ctx, new byte[]{(byte)r.nextInt(), (byte)r.nextInt(), (byte)r.nextInt(), (byte)r.nextInt()}).whenComplete((res, ex) -> {
+                        System.out.println(System.currentTimeMillis() - now + ":" + res);
+                    });
+                }
+            }
+        };
+
+        final List<Thread> threads = new ArrayList<>();
+        final int numThreads = 12;
+        for (int i = 0; i < numThreads; i++) {
+            Thread t = new Thread(runnable);
+            t.start();
+
+            threads.add(t);
+        }
+
+        for (Thread t : threads) {
+            t.join();
+        }
     }
 }

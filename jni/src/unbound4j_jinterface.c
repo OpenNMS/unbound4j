@@ -56,12 +56,57 @@
 #include "jniutils.h"
 #include "unbound4j.h"
 
+struct ub4j_java_refs {
+    jclass completableFuture;
+    jmethodID completableFuture_complete;
+    jmethodID completableFuture_constructor;
+};
+
+struct ub4j_java_refs g_java_refs;
+
+struct ub4j_java_callback_context {
+    jobject future;
+};
+
 JavaVM* g_vm;
 
 jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     printf("unbound4j: Loaded\n");
     fflush(stdout);
     g_vm = vm;
+
+    JNIEnv *env;
+    if ((*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_8) != JNI_OK) {
+        return JNI_ERR;
+    }
+
+    memset(&g_java_refs, 0, sizeof(struct ub4j_java_refs));
+    // Lookups classes/methods that we know we'll need and convert these to global refs so that they will remain
+    // accessible by other threads
+    g_java_refs.completableFuture = (*env)->FindClass(env, "java/util/concurrent/CompletableFuture");
+    if (g_java_refs.completableFuture == NULL) {
+        printf("unbound4j: Failed to find class for CompletableFuture.\n");
+        fflush(stdout);
+        return JNI_ERR;
+    }
+    g_java_refs.completableFuture = (*env)->NewGlobalRef(env, g_java_refs.completableFuture);
+    if (g_java_refs.completableFuture == NULL) {
+        printf("unbound4j: Failed to convert CompletableFuture class to global reference.\n");
+        fflush(stdout);
+        return JNI_ERR;
+    }
+    g_java_refs.completableFuture_constructor = (*env)->GetMethodID(env, g_java_refs.completableFuture, "<init>", "()V");
+    if (g_java_refs.completableFuture_constructor == NULL) {
+        printf("unbound4j: Failed to find constructor on CompletableFuture.\n");
+        fflush(stdout);
+        return JNI_ERR;
+    }
+    g_java_refs.completableFuture_complete = (*env)->GetMethodID(env, g_java_refs.completableFuture, "complete", "(Ljava/lang/Object;)Z");
+    if (g_java_refs.completableFuture_complete == NULL) {
+        printf("unbound4j: Failed to find complete method on CompletableFuture.\n");
+        fflush(stdout);
+        return JNI_ERR;
+    }
 
     ub4j_init();
 
@@ -79,7 +124,7 @@ JNIEXPORT jstring JNICALL Java_org_opennms_unbound4j_impl_Interface_version(JNIE
     return (*env)->NewStringUTF(env, ub_version());
 }
 
-JNIEXPORT jlong JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1context(JNIEnv *env, jclass clazz, jobject config) {
+JNIEXPORT jint JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1context(JNIEnv *env, jclass clazz, jobject config) {
     // Map the configuration from the POJO to the C struct
     struct ub4j_config ub4jconf;
 
@@ -133,7 +178,7 @@ JNIEXPORT jlong JNICALL Java_org_opennms_unbound4j_impl_Interface_create_1contex
     return nret;
 }
 
-JNIEXPORT void JNICALL Java_org_opennms_unbound4j_impl_Interface_delete_1context(JNIEnv *env, jclass clazz, jlong ctx_id) {
+JNIEXPORT void JNICALL Java_org_opennms_unbound4j_impl_Interface_delete_1context(JNIEnv *env, jclass clazz, jint ctx_id) {
     char error_str[256];
     size_t error_str_len = sizeof(error_str);
     if(ub4j_delete_context(ctx_id, error_str, error_str_len)) {
@@ -141,21 +186,12 @@ JNIEXPORT void JNICALL Java_org_opennms_unbound4j_impl_Interface_delete_1context
     }
 }
 
-typedef struct {
-    jclass string, byteArray, completableFuture;
-} Classes;
-
-typedef struct {
-    jclass futureClazz;
-    jmethodID completeMethodOnFuture;
-    jobject future;
-} CallbackContext;
-
-int findClasses(JNIEnv *env, Classes* classes);
-
 void callback(void* mydata, const char* err_str, char* result) {
-    CallbackContext* ctx = (CallbackContext*)mydata;
+    struct ub4j_java_callback_context* ctx = (struct ub4j_java_callback_context*)mydata;
 
+    clock_t t;
+    t = clock();
+    printf("Start callback.\n");
     // We can't share the JNIEnv reference between threads, so we need to grab a new one here
     JNIEnv *env;
     int getEnvStat = (*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_8);
@@ -171,15 +207,23 @@ void callback(void* mydata, const char* err_str, char* result) {
         goto cleanup;
     }
 
-    jclass completableFuture = (*env)->FindClass(env, "java/util/concurrent/CompletableFuture");
-    jmethodID complete = (*env)->GetMethodID(env, completableFuture, "complete", "(Ljava/lang/Object;)Z");
     if (err_str != NULL) {
         completeCompletableFutureExceptionally(env, ctx->future, err_str);
     } else if (result != NULL) {
         jstring hostname = (*env)->NewStringUTF(env, result);
-        (*env)->CallVoidMethod(env, ctx->future, complete, hostname);
+        (*env)->CallVoidMethod(env, ctx->future, g_java_refs.completableFuture_complete, hostname);
+        jthrowable exc = (*env)->ExceptionOccurred(env);
+        if (exc) {
+            printf("unbound4j: Error calling complete on future with host!");
+            fflush(stdout);
+        }
     } else {
-        (*env)->CallVoidMethod(env, ctx->future, complete, NULL);
+        (*env)->CallVoidMethod(env, ctx->future, g_java_refs.completableFuture_complete, NULL);
+        jthrowable exc = (*env)->ExceptionOccurred(env);
+        if (exc) {
+            printf("unbound4j: Error calling complete on future.");
+            fflush(stdout);
+        }
     }
 
     (*g_vm)->DetachCurrentThread(g_vm);
@@ -188,21 +232,19 @@ void callback(void* mydata, const char* err_str, char* result) {
         if (result != NULL) {
             free(result);
         }
+
+    t = clock() - t;
+    double time_taken = ((double)t)/CLOCKS_PER_SEC*1000; // in seconds
+    printf("Done callback in %fms.\n", time_taken);
+    fflush(stdout);
 }
 
-JNIEXPORT jobject JNICALL Java_org_opennms_unbound4j_impl_Interface_reverse_1lookup(JNIEnv *env, jclass clazz, jlong ctx_id, jbyteArray addr_bytes) {
-    // Grab references to the classes we may need
-    Classes classes;
-    if (findClasses(env, &classes) == -1) {
-        return NULL; // Exception already thrown
-    }
-
-    jmethodID constructor = (*env)->GetMethodID(env, classes.completableFuture, "<init>", "()V");
-    jobject future = (*env)->NewObject(env, classes.completableFuture, constructor);
+JNIEXPORT jobject JNICALL Java_org_opennms_unbound4j_impl_Interface_reverse_1lookup(JNIEnv *env, jclass clazz, jint ctx_id, jbyteArray addr_bytes) {
+    jobject future = (*env)->NewObject(env, g_java_refs.completableFuture, g_java_refs.completableFuture_constructor);
     // convert the future to a global reference (otherwise the local ref will die after this method call)
     future = (*env)->NewGlobalRef(env, future);
 
-    CallbackContext* callback_context = malloc(sizeof(CallbackContext));
+    struct ub4j_java_callback_context* callback_context = malloc(sizeof(struct ub4j_java_callback_context));
     callback_context->future = future;
 
     uint8_t* addr;
@@ -210,6 +252,7 @@ JNIEXPORT jobject JNICALL Java_org_opennms_unbound4j_impl_Interface_reverse_1loo
 
     char error_str[256];
     size_t error_str_len = sizeof(error_str);
+
     if (ub4j_reverse_lookup(ctx_id, addr, addr_len,
             callback_context, callback,
             error_str, error_str_len)) {
@@ -218,23 +261,4 @@ JNIEXPORT jobject JNICALL Java_org_opennms_unbound4j_impl_Interface_reverse_1loo
 
     free(addr);
     return future;
-}
-
-int findClasses(JNIEnv *env, Classes* classes) {
-    classes->completableFuture = (*env)->FindClass(env, "java/util/concurrent/CompletableFuture");
-    if(classes->completableFuture == NULL || (*env)->ExceptionOccurred(env) != NULL) {
-        return -1;
-    }
-
-    classes->string = (*env)->FindClass(env, "java/lang/String");
-    if(classes->string == NULL || (*env)->ExceptionOccurred(env) != NULL) {
-        return -1;
-    }
-
-    classes->byteArray = (*env)->FindClass(env, "[B");
-    if(classes->byteArray == NULL || (*env)->ExceptionOccurred(env) != NULL) {
-        return -1;
-    }
-
-    return 0;
 }

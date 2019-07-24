@@ -25,7 +25,7 @@ struct ub4j_config {
 };
 
 struct ub4j_context {
-    long id;
+    int id;
     struct ub_ctx *ub_ctx;
     int ub_fd;
     pthread_t thread_id;
@@ -41,8 +41,8 @@ void ub4j_destroy();
 
 struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error, size_t error_len);
 
-int ub4j_delete_context(long ctx_id, char* error, size_t error_len);
+int ub4j_delete_context(int ctx_id, char* error, size_t error_len);
 
-int ub4j_reverse_lookup(long ctx_id, uint8_t* addr, size_t addr_len, void* mydata, ub4j_callback_type callback, char* error, size_t error_len);
+int ub4j_reverse_lookup(int ctx_id, uint8_t* addr, size_t addr_len, void* mydata, ub4j_callback_type callback, char* error, size_t error_len);
 
 #endif //UNBOUND4J_UNBOUND4J_H

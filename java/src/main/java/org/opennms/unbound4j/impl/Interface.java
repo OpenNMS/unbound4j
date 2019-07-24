@@ -33,11 +33,11 @@ public class Interface {
 
     protected static native String version();
 
-    protected static native long create_context(Unbound4jConfig config);
+    protected static native int create_context(Unbound4jConfig config);
 
-    protected static native void delete_context(long ctx_id);
+    protected static native void delete_context(int ctx_id);
 
-    protected static native CompletableFuture<String> reverse_lookup(long ctx_id, byte[] addr);
+    protected static native CompletableFuture<String> reverse_lookup(int ctx_id, byte[] addr);
 
     /** Load the unbound4j runtime C library. */
     static void init() {

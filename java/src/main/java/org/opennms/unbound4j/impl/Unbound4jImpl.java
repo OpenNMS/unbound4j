@@ -33,7 +33,9 @@ public class Unbound4jImpl implements Unbound4j {
 
     @Override
     public CompletableFuture<Optional<String>> reverseLookup(Unbound4jContext ctx, InetAddress addr) {
-        return Interface.reverse_lookup(ctx.getId(), addr.getAddress()).thenApply(Optional::ofNullable);
+        final byte[] bytes = addr.getAddress();
+        return Interface.reverse_lookup(ctx.getId(), bytes)
+                .thenApply(Optional::ofNullable);
     }
 
 }

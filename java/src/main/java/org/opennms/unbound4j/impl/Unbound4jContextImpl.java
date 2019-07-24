@@ -19,14 +19,14 @@ package org.opennms.unbound4j.impl;
 import org.opennms.unbound4j.api.Unbound4jContext;
 
 public class Unbound4jContextImpl implements Unbound4jContext {
-    private final long id;
+    private final int id;
 
-    public Unbound4jContextImpl(long id) {
+    public Unbound4jContextImpl(int id) {
         this.id = id;
     }
 
     @Override
-    public long getId() {
+    public int getId() {
         return id;
     }
 

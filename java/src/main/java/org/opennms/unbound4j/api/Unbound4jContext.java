@@ -21,6 +21,6 @@ package org.opennms.unbound4j.api;
  */
 public interface Unbound4jContext extends AutoCloseable {
 
-    long getId();
+    int getId();
 
 }

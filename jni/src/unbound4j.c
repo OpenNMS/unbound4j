@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <unbound.h>
 #include <sys/shm.h>
+#include <stdatomic.h>
 
 #include "uthash.h"
 #include "unbound4j.h"
@@ -25,6 +26,7 @@
 #include "dnsutils.h"
 
 struct ub4j_context *contexts = NULL;
+atomic_int g_ctx_id_generator = ATOMIC_VAR_INIT(1);
 pthread_rwlock_t g_ctx_lock;
 pthread_mutex_t g_cfg_lock;
 
@@ -38,17 +40,29 @@ void ub4j_init() {
     }
 }
 
+int ub4j_free_context(struct ub4j_context *ctx, char* error, size_t error_len);
+
 void ub4j_destroy() {
     char error[256];
     size_t error_len = sizeof(error);
 
+    // Acquire a write lock
+    if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
+        printf("unbound4j: Acquiring write lock failed.");
+        return;
+    }
+
     // Delete all outstanding contexts
     struct ub4j_context *ctx, *tmp;
     HASH_ITER(hh, contexts, ctx, tmp) {
-        if(ub4j_delete_context(ctx->id, error, error_len)) {
+        HASH_DEL(contexts, ctx);
+        if(ub4j_free_context(ctx, error, error_len)) {
             printf("unbound4j: Deleting context failed: %s", error);
         }
     }
+
+    // Release the lock
+    pthread_rwlock_unlock(&g_ctx_lock);
 }
 
 void* context_processing_thread(void *arg);
@@ -94,6 +108,13 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
         pthread_mutex_unlock(&g_cfg_lock);
     }
 
+    // Use a thread instead of forking
+    if (ub_ctx_async(ctx->ub_ctx, 1)) {
+        snprintf(error, error_len, "Failed to configure asynchronous behaviour on Unbound context.");
+        ub_ctx_delete(ctx->ub_ctx);
+        return NULL;
+    }
+
     ctx->ub_fd = ub_fd(ctx->ub_ctx);
     if (ctx->ub_fd < 0) {
         snprintf(error, error_len, "Failed to acquire file description from Unbound context.");
@@ -109,7 +130,7 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
     }
 
     // Use the thread id as the context id, since this will be unique
-    ctx->id = ctx->thread_id;
+    ctx->id = atomic_fetch_add(&g_ctx_id_generator, 1);
 
     // Store the context
     if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
@@ -118,12 +139,13 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
         ub_ctx_delete(ctx->ub_ctx);
         return NULL;
     }
+
     HASH_ADD_INT(contexts, id, ctx);
     pthread_rwlock_unlock(&g_ctx_lock);
     return ctx;
 }
 
-int ub4j_delete_context(long ctx_id, char* error, size_t error_len) {
+int ub4j_delete_context(int ctx_id, char* error, size_t error_len) {
     // Acquire a write lock
     if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
         snprintf(error, error_len, "Failed to acquire write lock.");
@@ -131,7 +153,7 @@ int ub4j_delete_context(long ctx_id, char* error, size_t error_len) {
     }
 
     // Lookup the context by id and remove it from the hashmap if found
-    long id = (long)ctx_id;
+    int id = ctx_id;
     struct ub4j_context *ctx = NULL;
     HASH_FIND_INT(contexts, &id, ctx);
     if (ctx != NULL) {
@@ -146,6 +168,10 @@ int ub4j_delete_context(long ctx_id, char* error, size_t error_len) {
         return 0;
     }
 
+    return ub4j_free_context(ctx, error, error_len);
+}
+
+int ub4j_free_context(struct ub4j_context *ctx, char* error, size_t error_len) {
     int nret = 0;
 
     // Stop the thread and join
@@ -169,6 +195,9 @@ typedef struct {
 } ub4j_callback_context;
 
 void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result) {
+    printf("got callback for: %s\n", result != NULL ? result->qname : NULL);
+    fflush(stdout);
+
     ub4j_callback_context* callback_context = (ub4j_callback_context*)mydata;
 
     char* hostname = NULL;
@@ -176,6 +205,7 @@ void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result)
         if(result->havedata) {
             size_t hostname_len = 256; // maximum length of a domain name is 253
             hostname = malloc(hostname_len);
+            // TODO: Catch malloc failure
             sldns_wire2str_rdata_buf((uint8_t *) result->data[0], (size_t) result->len[0], hostname, hostname_len,
                                      (uint16_t) result->qtype);
         }
@@ -195,7 +225,7 @@ void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result)
     free(callback_context);
 }
 
-int ub4j_reverse_lookup(long ctx_id, uint8_t* addr, size_t addr_len, void* userdata, ub4j_callback_type callback, char* error, size_t error_len) {
+int ub4j_reverse_lookup(int ctx_id, uint8_t* addr, size_t addr_len, void* userdata, ub4j_callback_type callback, char* error, size_t error_len) {
     // Acquire a read lock
     if (pthread_rwlock_rdlock(&g_ctx_lock) != 0) {
         snprintf(error, error_len, "Failed to acquire read lock.");
@@ -203,7 +233,7 @@ int ub4j_reverse_lookup(long ctx_id, uint8_t* addr, size_t addr_len, void* userd
     }
 
     // Lookup the context by id
-    long id = (long)ctx_id;
+    int id = (int)ctx_id;
     struct ub4j_context *ctx = NULL;
     HASH_FIND_INT(contexts, &id, ctx);
 
@@ -244,12 +274,13 @@ int ub4j_reverse_lookup(long ctx_id, uint8_t* addr, size_t addr_len, void* userd
     callback_context->callback = callback;
 
     // Issue the reverse lookup
+    int async_id;
     int nret = ub_resolve_async(ctx->ub_ctx, reverse_lookup_domain,
                               12 /* RR_TYPE_PTR */,
                               1 /* CLASS IN (internet) */,
                               callback_context,
                               ub_reverse_lookup_callback,
-                              NULL);
+                              &async_id);
 
     // We done with the domain name now
     free(reverse_lookup_domain);
