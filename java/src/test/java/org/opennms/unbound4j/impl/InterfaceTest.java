@@ -16,36 +16,23 @@
 
 package org.opennms.unbound4j.impl;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.anyOf;
-import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.opennms.unbound4j.api.Unbound4jConfig;
-
-import com.google.common.base.Stopwatch;
-import com.google.common.net.InetAddresses;
 
 public class InterfaceTest {
 
@@ -62,8 +49,8 @@ public class InterfaceTest {
     @Before
     public void setUp() {
         ctx = Interface.create_context(Unbound4jConfig.newBuilder()
-                .useSystemResolver(false)
-                .withUnboundConfig("/tmp/unbound.conf")
+                .useSystemResolver(true)
+                .withRequestTimeout(15, TimeUnit.SECONDS)
                 .build());
     }
 
@@ -88,68 +75,4 @@ public class InterfaceTest {
         assertThat(Interface.reverse_lookup(ctx, addr).get(), nullValue());
     }
 
-    @Test
-    @Ignore
-    public void canDoItQuick() throws UnknownHostException, InterruptedException {
-        final List<CompletableFuture<String>> futures = new ArrayList<>();
-        final Set<String> results = new LinkedHashSet<>();
-
-        Stopwatch stopwatch = Stopwatch.createStarted();
-        for (InetAddress addr = InetAddress.getByName("10.0.0.1");
-             !addr.equals(InetAddress.getByName("10.2.255.255"));
-             addr = InetAddresses.increment(addr)) {
-            final CompletableFuture<String> future = Interface.reverse_lookup(ctx, addr.getAddress());
-            future.whenComplete((hostname,ex) -> results.add(hostname));
-            futures.add(future);
-        }
-        System.out.printf("Issued %d asynchronous reverse lookups in %dms.\n", futures.size(), stopwatch.elapsed(MILLISECONDS));
-
-        // Wait
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[]{})).get();
-        } catch (ExecutionException e) {
-            System.out.println("One or more queries failed.");
-        }
-        stopwatch.stop();
-        System.out.printf("Processed %d requests in %dms.\n", futures.size(), stopwatch.elapsed(MILLISECONDS));
-
-        final long numLookupsSuccessful = futures.stream().filter(f -> !f.isCompletedExceptionally()).count();
-        final long numLookupsFailed = futures.stream().filter(CompletableFuture::isCompletedExceptionally).count();
-        System.out.printf("%d lookups were successful and %d lookups failed.\n", numLookupsSuccessful, numLookupsFailed);
-
-        // Validate
-        assertThat(results, hasSize(1));
-        assertThat(results, contains((String)null));
-    }
-
-    @Test
-    public void doIt() throws InterruptedException {
-        System.out.println(ctx);
-        Random r = new Random();
-        final AtomicBoolean stopped = new AtomicBoolean(false);
-        Runnable runnable = new Runnable() {
-            @Override
-            public void run() {
-                while(!stopped.get()) {
-                    long now = System.currentTimeMillis();
-                    Interface.reverse_lookup(ctx, new byte[]{(byte)r.nextInt(), (byte)r.nextInt(), (byte)r.nextInt(), (byte)r.nextInt()}).whenComplete((res, ex) -> {
-                        System.out.println(System.currentTimeMillis() - now + ":" + res);
-                    });
-                }
-            }
-        };
-
-        final List<Thread> threads = new ArrayList<>();
-        final int numThreads = 12;
-        for (int i = 0; i < numThreads; i++) {
-            Thread t = new Thread(runnable);
-            t.start();
-
-            threads.add(t);
-        }
-
-        for (Thread t : threads) {
-            t.join();
-        }
-    }
 }

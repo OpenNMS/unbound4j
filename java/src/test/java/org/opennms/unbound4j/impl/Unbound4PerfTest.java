@@ -37,11 +37,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.opennms.unbound4j.api.Unbound4jConfig;
 import org.opennms.unbound4j.api.Unbound4jContext;
@@ -54,7 +54,7 @@ import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.net.InetAddresses;
 
-public class Unbound4jImplTest {
+public class Unbound4PerfTest {
 
     Unbound4jImpl ub4j = new Unbound4jImpl();
     Unbound4jContext ctx = ub4j.newContext(Unbound4jConfig.newBuilder()
@@ -114,6 +114,7 @@ public class Unbound4jImplTest {
     }
 
     @Test
+    @Ignore
     public void canPerformReverseLookupsWithManyThreads() throws Exception {
         ConsoleReporter reporter = ConsoleReporter.forRegistry(metrics)
                 .convertRatesTo(TimeUnit.SECONDS)

@@ -41,6 +41,6 @@ cp ../dist/libunbound4j.so ../java/src/main/resources/org/opennms/unbound4j/nati
 
 # Run the tests and create the .jar
 cd ../java
-mvn package -DskipTests=true || (echo "Build failed." && exit 1)
+mvn package || (echo "Build failed." && exit 1)
 cp target/unbound4j-*.jar ../dist/
 popd
