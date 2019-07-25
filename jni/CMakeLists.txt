@@ -42,7 +42,7 @@ ENDIF(CMAKE_COMPILER_IS_GNUCC)
 
 # Build the shared library
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
-add_library(unbound4j MODULE src/unbound4j_jinterface.c src/sldns.c src/jniutils.c src/unbound4j.c src/dnsutils.c src/dnsutils.h)
+add_library(unbound4j MODULE src/log.c src/unbound4j_jinterface.c src/sldns.c src/jniutils.c src/unbound4j.c src/dnsutils.c src/dnsutils.h)
 
 IF(APPLE)
 	SET_TARGET_PROPERTIES(unbound4j PROPERTIES PREFIX "lib" SUFFIX ".jnilib" INSTALL_NAME_DIR "/usr/local/lib")
@@ -53,6 +53,6 @@ ENDIF(APPLE)
 target_link_libraries(unbound4j unbound)
 
 # Main
-add_executable(unbound4j_main src/main.c src/sldns.c src/unbound4j.c src/dnsutils.c src/dnsutils.h)
+add_executable(unbound4j_main src/log.c src/main.c src/sldns.c src/unbound4j.c src/dnsutils.c src/dnsutils.h)
 target_link_libraries(unbound4j_main unbound)
 target_link_libraries(unbound4j_main pthread)

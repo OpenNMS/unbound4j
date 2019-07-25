@@ -55,6 +55,7 @@
 
 #include "jniutils.h"
 #include "unbound4j.h"
+#include "log.h"
 
 struct ub4j_java_refs {
     jclass completableFuture;
@@ -85,25 +86,25 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     // accessible by other threads
     g_java_refs.completableFuture = (*env)->FindClass(env, "java/util/concurrent/CompletableFuture");
     if (g_java_refs.completableFuture == NULL) {
-        printf("unbound4j: Failed to find class for CompletableFuture.\n");
+        log_fatal("unbound4j: Failed to find class for CompletableFuture.");
         fflush(stdout);
         return JNI_ERR;
     }
     g_java_refs.completableFuture = (*env)->NewGlobalRef(env, g_java_refs.completableFuture);
     if (g_java_refs.completableFuture == NULL) {
-        printf("unbound4j: Failed to convert CompletableFuture class to global reference.\n");
+        log_fatal("unbound4j: Failed to convert CompletableFuture class to global reference.");
         fflush(stdout);
         return JNI_ERR;
     }
     g_java_refs.completableFuture_constructor = (*env)->GetMethodID(env, g_java_refs.completableFuture, "<init>", "()V");
     if (g_java_refs.completableFuture_constructor == NULL) {
-        printf("unbound4j: Failed to find constructor on CompletableFuture.\n");
+        log_fatal("unbound4j: Failed to find constructor on CompletableFuture.");
         fflush(stdout);
         return JNI_ERR;
     }
     g_java_refs.completableFuture_complete = (*env)->GetMethodID(env, g_java_refs.completableFuture, "complete", "(Ljava/lang/Object;)Z");
     if (g_java_refs.completableFuture_complete == NULL) {
-        printf("unbound4j: Failed to find complete method on CompletableFuture.\n");
+        log_fatal("unbound4j: Failed to find complete method on CompletableFuture.");
         fflush(stdout);
         return JNI_ERR;
     }
@@ -203,13 +204,13 @@ void callback(void* mydata, const char* err_str, char* result) {
     int getEnvStat = (*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_8);
     if (getEnvStat == JNI_EDETACHED) {
         if ((*g_vm)->AttachCurrentThread(g_vm, (void **)&env, NULL) != 0) {
-            printf("unbound4j: Fatal error. Failed to attached current thread to VM.");
+            log_fatal("unbound4j: Fatal error. Failed to attached current thread to VM.");
             goto cleanup;
         }
     } else if (getEnvStat == JNI_OK) {
         // all good
     } else  {
-        printf("unbound4j: Fatal error. Failed to attached current thread to VM.");
+        log_fatal("unbound4j: Fatal error. Failed to attached current thread to VM.");
         goto cleanup;
     }
 
@@ -220,15 +221,13 @@ void callback(void* mydata, const char* err_str, char* result) {
         (*env)->CallVoidMethod(env, ctx->future, g_java_refs.completableFuture_complete, hostname);
         jthrowable exc = (*env)->ExceptionOccurred(env);
         if (exc) {
-            printf("unbound4j: Error calling complete on future with host!");
-            fflush(stdout);
+            log_error("unbound4j: Error calling complete on future with host!");
         }
     } else {
         (*env)->CallVoidMethod(env, ctx->future, g_java_refs.completableFuture_complete, NULL);
         jthrowable exc = (*env)->ExceptionOccurred(env);
         if (exc) {
-            printf("unbound4j: Error calling complete on future.");
-            fflush(stdout);
+            log_error("unbound4j: Error calling complete on future.");
         }
     }
 

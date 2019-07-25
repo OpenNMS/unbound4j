@@ -24,6 +24,7 @@
 #include "unbound4j.h"
 #include "sldns.h"
 #include "dnsutils.h"
+#include "log.h"
 
 struct ub4j_query {
     int id;
@@ -45,15 +46,15 @@ pthread_mutex_t g_cfg_lock;
 
 void ub4j_init() {
     if (pthread_rwlock_init(&g_ctx_lock, NULL) != 0) {
-        printf("unbound4j: Error while initializing read-write lock.\n");
+        log_fatal("unbound4j: Error while initializing context read-write lock.");
     }
 
     if (pthread_rwlock_init(&g_query_lock, NULL) != 0) {
-        printf("unbound4j: Error while initializing read-write lock.\n");
+        log_fatal("unbound4j: Error while initializing query read-write lock.");
     }
 
     if (pthread_mutex_init(&g_cfg_lock, NULL) != 0) {
-        printf("unbound4j: Error while initializing configuration lock.\n");
+        log_fatal("unbound4j: Error while initializing configuration lock.");
     }
 }
 
@@ -65,7 +66,7 @@ void ub4j_destroy() {
 
     // Acquire a write lock
     if (pthread_rwlock_wrlock(&g_ctx_lock) != 0) {
-        printf("unbound4j: Acquiring write lock failed.");
+        log_fatal("unbound4j: Acquiring write lock failed.");
         return;
     }
 
@@ -74,7 +75,7 @@ void ub4j_destroy() {
     HASH_ITER(hh, g_contexts, ctx, tmp) {
         HASH_DEL(g_contexts, ctx);
         if(ub4j_free_context(ctx, error, error_len)) {
-            printf("unbound4j: Deleting context failed: %s", error);
+            log_error("unbound4j: Deleting context failed: %s", error);
         }
     }
 
@@ -171,6 +172,7 @@ struct ub4j_context* ub4j_create_context(struct ub4j_config* config, char* error
 
     HASH_ADD_INT(g_contexts, id, ctx);
     pthread_rwlock_unlock(&g_ctx_lock);
+    log_debug("unbound4j: Successfully created unbound4j context with id:%d", ctx->id);
     return ctx;
 }
 
@@ -205,6 +207,7 @@ int ub4j_free_context(struct ub4j_context *ctx, char* error, size_t error_len) {
 
     // Stop the thread and join
     ctx->stopping = 1;
+    log_debug("unbound4j: Waiting on context thread to complete for context with id:%d", ctx->id);
     if (pthread_join(ctx->thread_id, NULL)) {
         snprintf(error, error_len, "Error on join for processing thread.");
         nret = -1;
@@ -253,7 +256,7 @@ void ub_reverse_lookup_callback(void* mydata, int err, struct ub_result* result)
             HASH_DEL(g_queries, query);
             pthread_rwlock_unlock(&g_query_lock);
         } else {
-            printf("unbound4j: Failed to acquire write lock.");
+            log_fatal("unbound4j: Failed to acquire write lock for query tracking.");
         }
     }
 
@@ -347,8 +350,6 @@ int ub4j_reverse_lookup(int ctx_id, uint8_t* addr, size_t addr_len, void* userda
 
 void* context_processing_thread(void *arg) {
     struct ub4j_context *ctx = (struct ub4j_context *)arg;
-
-
     struct ub4j_query *query, *query_tmp;
 
     struct timeval tv;
@@ -361,9 +362,9 @@ void* context_processing_thread(void *arg) {
         tv.tv_usec = 0;
 
         int ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
-        if (ret > 0) {
+        if (ret >= 0) {
             if(ub_process(ctx->ub_ctx)) {
-                printf("unbound4j: ub_process() error!\n");
+                log_fatal("unbound4j: ub_process() error!");
             }
         }
 
@@ -373,7 +374,7 @@ void* context_processing_thread(void *arg) {
 
         // Acquire a read lock
         if (pthread_rwlock_rdlock(&g_query_lock) != 0) {
-            printf("Failed to acquire read lock.");
+            log_fatal("unbound4j: Failed to acquire read lock.");
             continue;
         }
 
@@ -390,7 +391,7 @@ void* context_processing_thread(void *arg) {
         if (need_to_cancel_queries) {
             // Acquire a write lock
             if (pthread_rwlock_wrlock(&g_query_lock) != 0) {
-                printf("unbound4j: Failed to acquire write lock.");
+                log_fatal("unbound4j: Failed to acquire write lock.");
                 continue;
             }
 
@@ -419,7 +420,7 @@ void* context_processing_thread(void *arg) {
 
     // Acquire a write lock
     if (pthread_rwlock_wrlock(&g_query_lock) != 0) {
-        printf("unbound4j: Failed to acquire write lock.");
+        log_fatal("unbound4j: Failed to acquire write lock.");
     }
 
     // Iterate through the outstanding queries
